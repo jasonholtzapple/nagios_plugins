@@ -1,0 +1,64 @@
+#!/usr/bin/perl -w
+# Check memcached and memcached counters
+#
+# jason
+# Fri May 13 11:30:08 MST 2011
+
+use strict;
+use Getopt::Std;
+
+# sanitize ENV
+$ENV{PATH} = '/usr/bin';
+my $NC = '/bin/nc';
+my $PRINTF = '/usr/bin/printf';
+
+# Nagios plugin return values
+my $RET_OK   = 0;
+my $RET_WARN = 1;
+my $RET_CRIT = 2;
+my $RET_UNK  = 3;
+
+my %RET_STR = (
+    0 => 'OK',
+    1 => 'WARNING',
+    2 => 'CRITICAL',
+    3 => 'UNKNOWN'
+);
+
+my $out      = '';
+my $ret_val  = 0;
+my %stats    = ();
+my ($counter, $value);
+
+my %opts;
+getopts ('H:p:', \%opts);
+
+my $OPT_HOST   = $opts{H};
+my $OPT_PORT   = $opts{p} || 11211;
+
+sub usage {
+    print STDERR "Usage: $0 -H memcached server [ -p port ] -w cache effectiveness warning -c cache effectiveness critical\n";
+    exit $RET_UNK;
+}
+
+unless ($OPT_HOST) {
+    usage;
+}
+
+$out = qx($PRINTF 'stats\r\n' | $NC -q2 $OPT_HOST $OPT_PORT);
+if (defined $out && $? == 0) {
+    while ($out =~ /^STAT\s+(\S+)\s+(\S+)/mg) {
+        $stats{$1} = $2;
+    }
+    if ($stats{'accepting_conns'} != 1) {
+        if ($ret_val < 1) { $ret_val = 1; }
+    }
+        print "MEMCACHED $RET_STR{$ret_val} - curr_connections=$stats{'curr_connections'} get_hits=$stats{'get_hits'} get_misses=$stats{'get_misses'} listen_disabled_num=$stats{'listen_disabled_num'} bytes=$stats{'bytes'} evictions=$stats{'evictions'}|'curr_connections'=$stats{'curr_connections'} 'get_hits'=$stats{'get_hits'}c 'get_misses'=$stats{'get_misses'}c 'listen_disabled_num'=$stats{'listen_disabled_num'}c 'bytes'=$stats{'bytes'}B 'evictions'=$stats{'evictions'}c\n";
+        exit $ret_val;
+} else {
+    print "MEMCACHED UNKNOWN - shell command to check memcached had a problem\n";
+    exit $RET_UNK;
+}
+
+print "MEMCACHED UNKNOWN - unknown condition";
+exit $RET_UNK;

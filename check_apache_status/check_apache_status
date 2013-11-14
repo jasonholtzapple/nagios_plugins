@@ -1,0 +1,198 @@
+#!/usr/bin/perl -w
+# jason - Tue Jan 18 13:32:16 MST 2011
+
+use strict;
+use Getopt::Std;
+
+my $WGET = '/usr/bin/wget';
+
+# Nagios plugin return response
+my $RET_OK     = 0;
+my $RET_WARN   = 1;
+my $RET_CRIT   = 2;
+my $RET_UNK    = 3;
+my $ret_val    = 0;
+
+my @response   = ();
+my %response   = ();
+my %output     = ();
+my %sb         = ();
+my $ret        = '';
+my $stats      = '';
+my $line       = '';
+my $key        = '';
+my $value      = '';
+my $scoreboard = 0;
+my %opts;
+getopts ('h:p:u:w:c:i:x:', \%opts);
+
+my $OPT_HOST   = $opts{h};
+my $OPT_PORT   = $opts{p} || 80;
+my $OPT_URL    = $opts{u} || '/server-status?auto';
+my $OPT_WARN   = $opts{w};
+my $OPT_CRIT   = $opts{c};
+my $OPT_MIN    = $opts{i};
+my $OPT_MAX    = $opts{x};
+
+my %uom = (
+    'Total Accesses' => 'c',
+    'Total kBytes'   => 'c',
+    'CPULoad'        => '',
+    'Uptime'         => 's',
+    'ReqPerSec'      => '',
+    'BytesPerSec'    => 'B',
+    'BytesPerReq'    => 'B',
+    'BusyWorkers'    => '',
+    'IdleWorkers'    => '',
+);
+
+my %sb_map = (
+    '_' => 'Waiting',
+    'S' => 'Starting',
+    'R' => 'Reading',
+    'W' => 'Sending',
+    'K' => 'Keepalive',
+    'D' => 'DNS',
+    'C' => 'Closing',
+    'L' => 'Logging',
+    'G' => 'Graceful',
+    'I' => 'Idle',
+    '.' => 'Open',
+);
+
+my %warn;
+my %crit;
+my %min;
+my %max;
+
+if ($OPT_WARN) {
+    %warn = split /,/, $OPT_WARN;
+}
+if ($OPT_CRIT) {
+    %crit = split /,/, $OPT_CRIT;
+}
+if ($OPT_MIN) {
+    %min = split /,/, $OPT_MIN;
+}
+if ($OPT_MAX) {
+    %max = split /,/, $OPT_MAX;
+}
+
+sub usage {
+    print STDERR "Usage: $0 -h server -p port (default 80) -u status url (default /server-status?auto) -c comma-separated critical key value pairs -w comma-separated warning key value pairs -i comma-separated minimum key value pairs -x comma-separated maximum key value pairs \n";
+    exit $RET_UNK;
+};
+
+sub trim ($) {
+    my ($v) = @_;
+    $v =~ s/^\s+//g;
+    $v =~ s/\s+$//g;
+    return $v;
+}
+
+unless ($OPT_HOST && $OPT_PORT && $OPT_URL) {
+    usage;
+}
+
+@response = qx($WGET -O - http://${OPT_HOST}:${OPT_PORT}${OPT_URL} 2>/dev/null);
+foreach $line (@response) {
+    chomp ($line);
+    ($key, $value) = split /:/, $line;
+    $key = trim ($key);
+    $value = trim ($value);
+    # expand scoreboard line
+    if ($line =~ /scoreboard/i) {
+        $scoreboard = 1;
+        for my $type (keys %sb_map) {
+            $response{$sb_map{$type}} = () = $value =~ /(\Q$type\E)/g;
+         }
+    } else {
+        $response{$key} = $value;
+    }
+}
+
+delete $response{'Scoreboard'};
+$response{'CPULoad'} = 0 unless exists $response{'CPULoad'};
+%output = %response;
+
+foreach (sort keys %response) {
+    $ret .= qq($_ $output{$_} );
+    if (exists($uom{$_})) {
+        $output{$_} .= $uom{$_};
+    }
+    
+    if (exists($warn{$_})) {
+        $output{$_} .= ";$warn{$_};";
+        if ($response{$_} >= $warn{$_}) {
+            $ret_val = $RET_WARN unless $ret_val == $RET_CRIT;
+        }
+    } else {
+        $output{$_} .= ';;';
+    }
+
+    if (exists($crit{$_})) {
+        $output{$_} .= "$crit{$_};";
+        if ($response{$_} >= $crit{$_}) {
+            $ret_val = $RET_CRIT;
+        }
+    } else {
+        $output{$_} .= ';';
+    }
+
+    if (exists($min{$_})) {
+        $output{$_} .= "$min{$_};";
+    } else {
+        $output{$_} .= ';';
+    }
+
+    if (exists($max{$_})) {
+        $output{$_} .= "$max{$_}";
+    }
+
+    $stats .= qq('$_'=$output{$_} );
+}
+
+if ($scoreboard == 0) {
+    $ret_val = $RET_UNK;
+}
+
+if ($ret_val == $RET_OK) {
+    print "APACHE STATUS OK|$stats\n";
+    exit $RET_OK;
+} elsif ($ret_val == $RET_WARN) {
+    print "APACHE STATUS WARNING|$stats\n";
+    exit $RET_WARN;
+} elsif ($ret_val == $RET_CRIT) {
+    print "APACHE STATUS CRITICAL|$stats\n";
+    exit $RET_CRIT;
+} else {
+    print "APACHE STATUS UNKNOWN|$stats\n";
+    exit $RET_UNK;
+}
+
+=pod
+
+sample server-status?auto output
+
+Total Accesses: 41827397
+Total kBytes: 657002398
+CPULoad: .121248
+Uptime: 502745
+ReqPerSec: 83.198
+BytesPerSec: 1338190
+BytesPerReq: 16084.4
+BusyWorkers: 499
+IdleWorkers: 79
+Scoreboard: W.K_KKKKKKKKK_WKK_KWK__KKK_KKKKK_.KKK..KKKC_KKKKW_KKKKKWWKKKKKK.C.K_
+K.KKC_KKK_KKKKKKKRKWKKKK.K_KKKKC__WC.KKKKKKKK__WKCKKKWKKK.CWKKK_K_K___KKKKKKK_KK
+CWKKKK_K_KKKCKKKKCKK.KKKKKKR.K_KKK_KK_W_KKKKKCKK_KKKKKKKKKKW_KKKK.CKKKKK..KWWKK_
+KCK_K_.KKKWKKK_KK_WKK_KKKKKKKKKKKKWKKKK.__WKKKCKKK_KKKWC_KKKKKK_K_KKKCKK__KKKKKK
+KKKK_KK._.KKK_KKK_K.K_KKK_KKKCCKK_KWKK_KKRKKKKKKKKWKKKWKCKKKCKKKKKKKRKKK_KKK_WK_
+K_KKKKK.K.K_K.K_KKK_KKKKKCKWKK.KWKKKKKWKKK_KK_KKKKKK.KWWKKKK_KKCKKKK.KK_KKK_KW.K
+KK.KKCKK.KKKK.CKWKKWKKKKKKKKK_K.KKKCK.K.WKK__KKKKKKKKKKWKKKKWC.KKKKKKKKKKKK_WWKK
+_KK_KKKKKKCKK.KK_K_.KKK_KK_CWKK_.WKKK_KKKCKKWKKW_KC_KKCKKKKKK..K....K..K..K.....
+..........K......K..............................................................
+................................................................................
+................................................................................
+................................................................................
+............................................................................
