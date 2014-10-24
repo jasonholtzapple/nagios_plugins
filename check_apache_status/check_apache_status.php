@@ -43,4 +43,16 @@ $def[1] .= rrd::gprint("finishing", "LAST", "%3.0lf");
 $def[1] .= rrd::area("cleanup", "#ff00cc", rrd::cut("Cleanup", 10), 1) ;
 $def[1] .= rrd::gprint("cleanup", "LAST", '%3.0lf\n');
 
+foreach ($this->DS as $KEY=>$VAL) {
+    if ($VAL['WARN'] != "") {
+        if ($VAL['NAME'] == "BusyWorkers") {
+            $def[1] .= rrd::hrule($VAL['WARN'], "#ffff00", "Warning  on ".$VAL['WARN']." total workers\\n");
+        }
+    }
+    if ($VAL['CRIT'] != "") {
+        if ($VAL['NAME'] == "BusyWorkers") {
+            $def[1] .= rrd::hrule($VAL['CRIT'], "#ff0000", "Critical on ".$VAL['CRIT']." total workers\\n");
+        }
+    }
+}
 ?>
