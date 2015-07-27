@@ -1,10 +1,16 @@
 #!/usr/bin/perl -w
-# jason - Tue Jan 18 13:32:16 MST 2011
 
 use strict;
 use Getopt::Std;
 
 my $WGET = '/usr/bin/wget';
+WHICH:
+for (split /:/, $ENV{'PATH'}) {
+    if (-x "$_/wget") {
+        $WGET = "$_/wget";
+        last WHICH;
+    }
+}
 
 # Nagios plugin return response
 my $RET_OK     = 0;
@@ -23,16 +29,30 @@ my $line       = '';
 my $key        = '';
 my $value      = '';
 my $scoreboard = 0;
+
 my %opts;
-getopts ('h:p:u:w:c:i:x:', \%opts);
+getopts ('th:p:u:w:c:i:x:', \%opts);
 
 my $OPT_HOST   = $opts{h};
-my $OPT_PORT   = $opts{p} || 80;
+my $OPT_PORT   = $opts{p};
 my $OPT_URL    = $opts{u} || '/server-status?auto';
 my $OPT_WARN   = $opts{w};
 my $OPT_CRIT   = $opts{c};
 my $OPT_MIN    = $opts{i};
 my $OPT_MAX    = $opts{x};
+
+my $WGET_ARGS  = '';
+my $SCHEME     = '';
+
+if (defined $opts{t} and $opts{t} == 1) {
+    $WGET_ARGS = '--no-check-certificate -O -';
+    $SCHEME    = 'https';
+    $OPT_PORT  ||= 443;
+} else {
+    $WGET_ARGS = '-O -';
+    $SCHEME    = 'http';
+    $OPT_PORT  ||= 80;
+}
 
 my %uom = (
     'Total Accesses' => 'c',
@@ -79,7 +99,7 @@ if ($OPT_MAX) {
 }
 
 sub usage {
-    print STDERR "Usage: $0 -h server -p port (default 80) -u status url (default /server-status?auto) -c comma-separated critical key value pairs -w comma-separated warning key value pairs -i comma-separated minimum key value pairs -x comma-separated maximum key value pairs \n";
+    print STDERR "Usage: $0 -t (enable SSL/TLS) -h server -p port (default 80) -u status url (default /server-status?auto) -c comma-separated critical key value pairs -w comma-separated warning key value pairs -i comma-separated minimum key value pairs -x comma-separated maximum key value pairs \n";
     exit $RET_UNK;
 };
 
@@ -94,7 +114,8 @@ unless ($OPT_HOST && $OPT_PORT && $OPT_URL) {
     usage;
 }
 
-@response = qx($WGET -O - http://${OPT_HOST}:${OPT_PORT}${OPT_URL} 2>/dev/null);
+@response = qx($WGET $WGET_ARGS $SCHEME://${OPT_HOST}:${OPT_PORT}${OPT_URL} 2>/dev/null);
+
 foreach $line (@response) {
     chomp ($line);
     ($key, $value) = split /:/, $line;
