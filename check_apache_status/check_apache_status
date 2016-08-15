@@ -43,6 +43,18 @@ my $OPT_MAX    = $opts{x};
 
 my $WGET_ARGS  = '';
 my $SCHEME     = '';
+my %WHITELIST  = (
+    'Total Accesses' => 1,
+    'Total kBytes' => 1,
+    'CPULoad' => 1,
+    'Uptime' => 1,
+    'ReqPerSec' => 1,
+    'BytesPerSec' => 1,
+    'BytesPerReq' => 1,
+    'BusyWorkers' => 1,
+    'IdleWorkers' => 1,
+    'Scoreboard' => 1,
+);
 
 if (defined $opts{t} and $opts{t} == 1) {
     $WGET_ARGS = '--no-check-certificate -O -';
@@ -120,7 +132,9 @@ foreach $line (@response) {
     chomp ($line);
     ($key, $value) = split /:/, $line;
     $key = trim ($key);
+    next unless exists $WHITELIST{"$key"};
     $value = trim ($value);
+    next unless length $value > 0;
     # expand scoreboard line
     if ($line =~ /scoreboard/i) {
         $scoreboard = 1;
